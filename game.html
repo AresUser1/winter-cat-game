@@ -799,22 +799,36 @@
         }
     }
 
-    // --- ФУНКЦИЯ ОТПРАВКИ ДАННЫХ ---
+    // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ ---
     function finishGame() {
         if (!gameScene) return;
         
+        // 1. Собираем данные
         const results = {
             loot: gameScene.stats.loot,
             coins: gameScene.stats.coins,
             gifts: gameScene.stats.gifts,
             x: gameScene.player.x,
-            y: gameScene.player.y
+            y: gameScene.player.y,
+            energy: gameScene.stats.energy 
         };
         
-        // Отправляем данные
-        tg.sendData(JSON.stringify(results));
-        // Принудительно закрываем (на всякий случай)
-        setTimeout(() => tg.close(), 100);
+        // 2. Визуально показываем, что отправка идет (для отладки)
+        // Если это всплывающее окно появится, значит JS код работает верно
+        // alert("Отправка данных: " + JSON.stringify(results)); 
+
+        try {
+            // 3. Отправляем данные боту
+            tg.sendData(JSON.stringify(results));
+            
+            // 4. Ждем дольше перед закрытием (500мс), чтобы Телеграм успел прожевать данные
+            setTimeout(() => {
+                tg.close();
+            }, 500);
+            
+        } catch (e) {
+            alert("Ошибка отправки: " + e);
+        }
     }
 
     function updateHTMLStats(stats) {
