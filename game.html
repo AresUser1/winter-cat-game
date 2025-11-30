@@ -225,11 +225,14 @@
     tg.expand();
     tg.ready();
 
+    // --- ПОЛУЧАЕМ ТОКЕН И КООРДИНАТЫ ---
     function getStartParams() {
         const urlParams = new URLSearchParams(window.location.search);
         return {
             x: parseInt(urlParams.get('x')) || 0,
-            y: parseInt(urlParams.get('y')) || 0
+            y: parseInt(urlParams.get('y')) || 0,
+            // Читаем токен защиты из ссылки (если его нет, ставим 0)
+            token: urlParams.get('token') || '0' 
         };
     }
 
@@ -799,35 +802,28 @@
         }
     }
 
-    // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ОТПРАВКИ ---
+    // --- ОТПРАВЛЯЕМ ТОКЕН ОБРАТНО ---
     function finishGame() {
         if (!gameScene) return;
         
-        // 1. Собираем данные
+        // Берем токен, который мы получили при старте
+        const currentToken = getStartParams().token;
+
         const results = {
             loot: gameScene.stats.loot,
             coins: gameScene.stats.coins,
             gifts: gameScene.stats.gifts,
             x: gameScene.player.x,
             y: gameScene.player.y,
-            energy: gameScene.stats.energy 
+            energy: gameScene.stats.energy,
+            token: currentToken // <--- ВАЖНО: Возвращаем токен боту
         };
         
-        // 2. Визуально показываем, что отправка идет (для отладки)
-        // Если это всплывающее окно появится, значит JS код работает верно
-        // alert("Отправка данных: " + JSON.stringify(results)); 
-
         try {
-            // 3. Отправляем данные боту
             tg.sendData(JSON.stringify(results));
-            
-            // 4. Ждем дольше перед закрытием (500мс), чтобы Телеграм успел прожевать данные
-            setTimeout(() => {
-                tg.close();
-            }, 500);
-            
+            setTimeout(() => { tg.close(); }, 500);
         } catch (e) {
-            alert("Ошибка отправки: " + e);
+            alert("Ошибка: " + e);
         }
     }
 
