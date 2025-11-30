@@ -1,0 +1,507 @@
+<script>
+    // --- ИНИЦИАЛИЗАЦИЯ TELEGRAM WEB APP ---
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    tg.ready();
+
+    let game = null;
+    let gameScene = null;
+    let isGameActive = false;
+
+    // --- ПОЛУЧЕНИЕ КООРДИНАТ ИЗ URL ---
+    function getStartParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        return {
+            x: parseInt(urlParams.get('x')) || 0,
+            y: parseInt(urlParams.get('y')) || 0
+        };
+    }
+
+    // --- AUDIO ENGINE (Тот же, что и был) ---
+    const AudioEngine = {
+        ctx: null, masterGain: null, windNode: null, windGain: null, slideNode: null, slideGain: null, isSliding: false,
+        init: function() {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioContext();
+            this.masterGain = this.ctx.createGain();
+            this.masterGain.gain.value = 0.8; 
+            this.masterGain.connect(this.ctx.destination);
+            this.initWind();
+        },
+        initWind: function() {
+            if(!this.ctx) return;
+            const bufferSize = this.ctx.sampleRate * 2;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            let lastOut = 0; 
+            for (let i = 0; i < bufferSize; i++) {
+                let white = Math.random() * 2 - 1;
+                data[i] = (lastOut + (0.02 * white)) / 1.02; lastOut = data[i]; data[i] *= 3.5; 
+            }
+            this.windNode = this.ctx.createBufferSource();
+            this.windNode.buffer = buffer;
+            this.windNode.loop = true;
+            this.windFilter = this.ctx.createBiquadFilter();
+            this.windFilter.type = 'lowpass';
+            this.windFilter.frequency.value = 400;
+            this.windGain = this.ctx.createGain();
+            this.windGain.gain.value = 0.05; 
+            this.windNode.connect(this.windFilter);
+            this.windFilter.connect(this.windGain);
+            this.windGain.connect(this.masterGain);
+            this.windNode.start();
+            setInterval(() => {
+                if(!isGameActive) return;
+                const time = this.ctx.currentTime;
+                const newVol = 0.05 + Math.random() * 0.15;
+                const dur = 2 + Math.random() * 3;
+                this.windGain.gain.linearRampToValueAtTime(newVol, time + dur/2);
+                this.windGain.gain.linearRampToValueAtTime(0.05, time + dur);
+                const newFreq = 300 + Math.random() * 600;
+                this.windFilter.frequency.exponentialRampToValueAtTime(newFreq, time + dur/2);
+                this.windFilter.frequency.exponentialRampToValueAtTime(400, time + dur);
+            }, 5000);
+        },
+        playTone: function(freq, type, duration, vol=0.1) {
+            if(!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+            osc.start();
+            osc.stop(this.ctx.currentTime + duration);
+        },
+        playCrunchNoise: function() {
+            if(!this.ctx) return;
+            const t = this.ctx.currentTime;
+            const duration = 0.14; 
+            const bufferSize = this.ctx.sampleRate * duration;
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) { data[i] = (Math.random() * 2 - 1) * 0.5; }
+            const noise = this.ctx.createBufferSource();
+            noise.buffer = buffer;
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 1100 + (Math.random() * 200 - 100); 
+            filter.Q.value = 0.8; 
+            const gain = this.ctx.createGain();
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.6, t + 0.015); 
+            gain.gain.exponentialRampToValueAtTime(0.01, t + duration);
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.masterGain);
+            noise.start();
+        },
+        startSlideSound: function() {
+            if(!this.ctx || this.isSliding) return;
+            this.isSliding = true;
+            const bufferSize = this.ctx.sampleRate * 2; 
+            const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) { data[i] = Math.random() * 2 - 1; }
+            this.slideNode = this.ctx.createBufferSource();
+            this.slideNode.buffer = buffer;
+            this.slideNode.loop = true;
+            const filter = this.ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 2500; 
+            filter.Q.value = 4;
+            this.slideGain = this.ctx.createGain();
+            this.slideGain.gain.setValueAtTime(0, this.ctx.currentTime);
+            this.slideGain.gain.linearRampToValueAtTime(0.15, this.ctx.currentTime + 0.3);
+            this.slideNode.connect(filter);
+            filter.connect(this.slideGain);
+            this.slideGain.connect(this.masterGain);
+            this.slideNode.start();
+        },
+        stopSlideSound: function() {
+            if(!this.ctx || !this.isSliding) return;
+            const t = this.ctx.currentTime;
+            this.slideGain.gain.cancelScheduledValues(t);
+            this.slideGain.gain.setValueAtTime(this.slideGain.gain.value, t);
+            this.slideGain.gain.linearRampToValueAtTime(0, t + 0.2);
+            const node = this.slideNode;
+            setTimeout(() => { if(node) node.stop(); }, 250);
+            this.isSliding = false;
+        },
+        step: function() { this.playCrunchNoise(); },
+        coin: function() { this.playTone(1500, 'sine', 0.2, 0.15); setTimeout(()=>this.playTone(2000, 'sine', 0.3, 0.15), 60); }, 
+        bump: function() { this.playTone(100, 'square', 0.1, 0.2); }
+    };
+
+    // --- CAT SVG ---
+    const catSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"><defs><linearGradient id="fur" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#ffb347;stop-opacity:1" /><stop offset="100%" style="stop-color:#ffcc33;stop-opacity:1" /></linearGradient><filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceAlpha" stdDeviation="4"/><feOffset dx="0" dy="4" result="offsetblur"/><feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer><feMerge><feMergeNode in="offsetblur"/></feMerge></filter></defs><ellipse cx="100" cy="180" rx="60" ry="15" fill="rgba(0,0,0,0.25)" /><path d="M40 70 L45 20 L90 60 Z" fill="url(#fur)" stroke="#d97706" stroke-width="4" stroke-linejoin="round"/><path d="M160 70 L155 20 L110 60 Z" fill="url(#fur)" stroke="#d97706" stroke-width="4" stroke-linejoin="round"/><path d="M50 60 L52 35 L75 55 Z" fill="#fecaca" /><path d="M150 60 L148 35 L125 55 Z" fill="#fecaca" /><ellipse cx="100" cy="110" rx="70" ry="60" fill="rgba(0,0,0,1)" filter="url(#softShadow)"/><ellipse cx="100" cy="110" rx="70" ry="60" fill="url(#fur)" stroke="#d97706" stroke-width="4"/><path d="M32 110 L20 105 L30 120 L22 130 L35 135" fill="#ffb347" stroke="#d97706" stroke-width="3" stroke-linejoin="round"/><path d="M168 110 L180 105 L170 120 L178 130 L165 135" fill="#ffb347" stroke="#d97706" stroke-width="3" stroke-linejoin="round"/><g transform="rotate(-5, 100, 50)"><path d="M40 65 Q100 80 160 65 L160 75 Q100 90 40 75 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/><path d="M150 70 Q180 90 170 120 L130 80" fill="#dc2626" stroke="#991b1b" stroke-width="3"/><path d="M40 75 Q100 20 160 75" fill="#dc2626" stroke="#991b1b" stroke-width="3"/><circle cx="170" cy="120" r="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/></g><ellipse cx="100" cy="125" rx="25" ry="18" fill="#ffedd5" /> <circle cx="75" cy="105" r="10" fill="#1a1a1a"/><circle cx="71" cy="101" r="4" fill="#ffffff"/><circle cx="125" cy="105" r="10" fill="#1a1a1a"/><circle cx="121" cy="101" r="4" fill="#ffffff"/><path d="M94 118 L106 118 L100 124 Z" fill="#ef4444" stroke="#b91c1c" stroke-width="1" stroke-linejoin="round"/><path d="M100 124 Q90 135 80 128 M100 124 Q110 135 120 128" stroke="#1a1a1a" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M60 120 L25 115 M60 125 L20 128 M60 130 L25 138" stroke="#000" stroke-width="2" /><path d="M140 120 L175 115 M140 125 L180 128 M140 130 L175 138" stroke="#000" stroke-width="2" /></svg>`;
+
+    class GameScene extends Phaser.Scene {
+        constructor() {
+            super('GameScene');
+            this.TILE_SIZE = 70;
+            this.CHUNK_SIZE = 16;
+            this.chunks = new Map();
+            // Получаем стартовые координаты из URL
+            const startParams = getStartParams();
+            this.player = { x: startParams.x, y: startParams.y };
+            this.isSliding = false;
+            this.stats = { energy: 50, loot: 0, coins: 0 };
+            this.COLORS = { snowTop: 0xf1f5f9, snowSide: 0x94a3b8, iceTop: 0xbae6fd, iceSide: 0x38bdf8, fog: 0x020617 };
+        }
+
+        create() {
+            this.createTextures();
+            this.tileGroup = this.add.group();
+            this.objGroup = this.add.group();
+
+            const catText = this.add.text(0, 0, '🐱', { fontSize: '50px' }).setOrigin(0.5, 0.8).setDepth(100);
+            this.catSprite = catText;
+
+            this.createCatTexture();
+            this.cameras.main.setBackgroundColor('#020617');
+            this.cameras.main.startFollow(this.catSprite, true, 0.1, 0.1);
+            this.input.on('pointerdown', (pointer) => this.handleInput(pointer));
+
+            // SNOW PARTICLES
+            const snowG = this.make.graphics({x:0, y:0, add:false});
+            snowG.fillStyle(0xffffff, 0.8);
+            snowG.fillCircle(4, 4, 3);
+            snowG.generateTexture('snowflake', 8, 8);
+            const maxW = Math.max(window.innerWidth, window.innerHeight) * 2;
+            const emitter = this.add.particles(0, 0, 'snowflake', {
+                x: { min: -maxW/2, max: maxW/2 }, y: -50, lifespan: 6000,
+                speedY: { min: 30, max: 80 }, speedX: { min: -20, max: 20 },
+                scale: { start: 0.8, end: 0.2 }, alpha: { start: 0.6, end: 0 },
+                quantity: 2, frequency: 100, blendMode: 'ADD', emitting: true
+            });
+            emitter.setScrollFactor(0); emitter.setDepth(200);
+
+            this.initMap();
+        }
+
+        createCatTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 200; canvas.height = 200;
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, 200, 200);
+                if (this.textures.exists('cat')) this.textures.remove('cat');
+                this.textures.addCanvas('cat', canvas);
+                if (this.catSprite) {
+                    const x = this.catSprite.x; const y = this.catSprite.y;
+                    this.catSprite.destroy();
+                    this.catSprite = this.add.sprite(x, y, 'cat').setDepth(100);
+                    this.catSprite.setDisplaySize(60, 60);
+                    this.catSprite.setOrigin(0.5, 0.8);
+                    this.cameras.main.startFollow(this.catSprite, true, 0.1, 0.1);
+                }
+            };
+            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(catSvg);
+        }
+
+        createTextures() {
+            const g = this.make.graphics({x:0, y:0, add:false});
+            const ts = this.TILE_SIZE;
+            g.clear(); g.fillStyle(this.COLORS.snowSide); g.fillRect(2, ts/2 + 2, ts-4, (ts/2)+4); g.fillStyle(this.COLORS.snowTop); g.fillRoundedRect(2, 2, ts-4, ts-4, 4); g.generateTexture('tile_snow', ts, ts);
+            g.clear(); g.fillStyle(this.COLORS.iceSide); g.fillRect(2, ts/2 + 2, ts-4, ts/2 + 4); g.fillStyle(this.COLORS.iceTop); g.fillRoundedRect(2, 2, ts-4, ts-4, 4); g.fillStyle(0xffffff, 0.4); g.beginPath(); g.moveTo(10, ts-15); g.lineTo(ts-15, 15); g.lineTo(ts-25, 15); g.lineTo(10, ts-25); g.fillPath(); g.generateTexture('tile_ice', ts, ts);
+            g.clear(); g.fillStyle(this.COLORS.fog); g.fillRect(0, 0, ts, ts); g.generateTexture('tile_fog', ts, ts);
+            g.destroy();
+            this.createEmojiTexture('tex_tree', '🎄', 50, '#22c55e', true);
+            this.createEmojiTexture('tex_star', '⭐', 20, '#fbbf24', true);
+            this.createEmojiTexture('tex_orange', '🍊', 30, '#fbbf24', true);
+            this.createEmojiTexture('tex_coin', '💰', 30, '#ffffff', true);
+            this.createEmojiTexture('tex_gift', '🎁', 30, '#f472b6', true);
+        }
+
+        createEmojiTexture(key, emoji, fontSize, glowColor, circleOutline) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 80; canvas.height = 80;
+            const ctx = canvas.getContext('2d');
+            if(circleOutline && key !== 'tex_tree' && key !== 'tex_star') {
+                ctx.strokeStyle = glowColor; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(40, 40, 16, 0, Math.PI*2);
+                ctx.globalAlpha = 0.3; ctx.stroke(); ctx.globalAlpha = 1.0;
+            }
+            ctx.font = `${fontSize}px serif`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.shadowColor = glowColor; ctx.shadowBlur = 15;
+            ctx.fillText(emoji, 40, 40);
+            this.textures.addCanvas(key, canvas);
+        }
+
+        initMap() {
+            this.tileGroup.clear(true, true);
+            this.objGroup.clear(true, true);
+            this.chunks.clear();
+            
+            // Загружаем сохраненную позицию или 0,0
+            const startParams = getStartParams();
+            this.player = { x: startParams.x, y: startParams.y };
+            
+            this.stats = { energy: 50, loot: 0, coins: 0 };
+            
+            // Перемещаем спрайт в нужное место
+            const startX = this.player.x * this.TILE_SIZE + this.TILE_SIZE/2;
+            const startY = this.player.y * this.TILE_SIZE + this.TILE_SIZE/2;
+            this.catSprite.setPosition(startX, startY);
+            
+            this.revealFog(this.player.x, this.player.y);
+            this.updateView();
+            updateHTMLStats(this.stats);
+        }
+
+        getChunk(cx, cy) {
+            const key = `${cx},${cy}`;
+            if (this.chunks.has(key)) return this.chunks.get(key);
+            const chunk = [];
+            for (let y = 0; y < this.CHUNK_SIZE; y++) {
+                const row = [];
+                for (let x = 0; x < this.CHUNK_SIZE; x++) {
+                    const gx = cx * this.CHUNK_SIZE + x;
+                    const gy = cy * this.CHUNK_SIZE + y;
+                    let type = 'snow'; let obj = null;
+                    const iceNoise = Math.sin(gx * 0.2) * Math.cos(gy * 0.2);
+                    const r = Math.random();
+                    if (iceNoise > 0.45) type = 'ice';
+                    else {
+                        if (r < 0.12) obj = 'tree';
+                        else if (r < 0.18) obj = 'loot';
+                        else if (r < 0.24) obj = 'coin';
+                        else if (r < 0.26) obj = 'gift';
+                    }
+                    if (Math.abs(gx) < 2 && Math.abs(gy) < 2) { type = 'snow'; obj = null; }
+                    row.push({ gx, gy, type, obj, revealed: false, sprite: null, objSprite: null });
+                }
+                chunk.push(row);
+            }
+            this.chunks.set(key, chunk);
+            return chunk;
+        }
+
+        getTileData(gx, gy) {
+            const cx = Math.floor(gx / this.CHUNK_SIZE);
+            const cy = Math.floor(gy / this.CHUNK_SIZE);
+            const chunk = this.getChunk(cx, cy);
+            let lx = ((gx % this.CHUNK_SIZE) + this.CHUNK_SIZE) % this.CHUNK_SIZE;
+            let ly = ((gy % this.CHUNK_SIZE) + this.CHUNK_SIZE) % this.CHUNK_SIZE;
+            return chunk[ly][lx];
+        }
+
+        updateView() {
+            const range = 6;
+            const px = this.player.x;
+            const py = this.player.y;
+            for(let dy = -range; dy <= range; dy++) {
+                for(let dx = -range; dx <= range; dx++) {
+                    const gx = px + dx; const gy = py + dy;
+                    const tile = this.getTileData(gx, gy);
+                    const wx = gx * this.TILE_SIZE + this.TILE_SIZE/2;
+                    const wy = gy * this.TILE_SIZE + this.TILE_SIZE/2;
+                    if (!tile.sprite) {
+                        tile.sprite = this.add.image(wx, wy, 'tile_fog');
+                        tile.sprite.setDisplaySize(this.TILE_SIZE, this.TILE_SIZE);
+                        this.tileGroup.add(tile.sprite);
+                    }
+                    if (tile.revealed) {
+                        const texKey = tile.type === 'ice' ? 'tile_ice' : 'tile_snow';
+                        if(tile.sprite.texture.key !== texKey) tile.sprite.setTexture(texKey);
+                        if(tile.obj && !tile.objSprite) {
+                            if(tile.obj === 'tree') {
+                                const tree = this.add.image(wx, wy - 10, 'tex_tree');
+                                tree.setDisplaySize(50, 50);
+                                const star = this.add.image(wx, wy - 35, 'tex_star');
+                                star.setDisplaySize(30, 30);
+                                this.tweens.add({ targets: star, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
+                                tile.objSprite = [tree, star];
+                                this.objGroup.add(tree); this.objGroup.add(star);
+                            } else {
+                                let key = tile.obj === 'loot' ? 'tex_orange' : (tile.obj === 'coin' ? 'tex_coin' : 'tex_gift');
+                                const item = this.add.image(wx, wy, key);
+                                item.setDisplaySize(50, 50);
+                                this.tweens.add({ targets: item, y: wy - 5, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+                                tile.objSprite = item;
+                                this.objGroup.add(item);
+                            }
+                        }
+                    } else {
+                        if(tile.sprite.texture.key !== 'tile_fog') tile.sprite.setTexture('tile_fog');
+                        if(tile.objSprite) {
+                            if(Array.isArray(tile.objSprite)) tile.objSprite.forEach(s => s.destroy());
+                            else tile.objSprite.destroy();
+                            tile.objSprite = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        handleInput(pointer) {
+            if (!isGameActive || this.isSliding) return;
+            const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+            const gx = Math.floor(worldPoint.x / this.TILE_SIZE);
+            const gy = Math.floor(worldPoint.y / this.TILE_SIZE);
+            if (Math.abs(gx - this.player.x) + Math.abs(gy - this.player.y) === 1) {
+                this.step(gx - this.player.x, gy - this.player.y);
+            }
+        }
+
+        async step(dx, dy) {
+            if (this.stats.energy <= 0) { showLog("Сил нет! 😴"); return; }
+            const tx = this.player.x + dx;
+            const ty = this.player.y + dy;
+            const tile = this.getTileData(tx, ty);
+            if (tile.obj === 'tree') { AudioEngine.bump(); showLog("Ёлка! 🎄"); return; }
+            if(!this.isSliding) AudioEngine.step(); 
+            
+            // Не уменьшаем энергию (она для вида), спишем в боте
+            updateHTMLStats(this.stats);
+            await this.moveVisual(dx, dy);
+            if (tile.type === 'ice') {
+                this.isSliding = true;
+                AudioEngine.startSlideSound();
+                await this.slideLoop(dx, dy);
+                this.isSliding = false;
+                AudioEngine.stopSlideSound();
+            }
+        }
+
+        async slideLoop(dx, dy) {
+            let sliding = true;
+            while (sliding) {
+                const nx = this.player.x + dx;
+                const ny = this.player.y + dy;
+                const nextTile = this.getTileData(nx, ny);
+                if (nextTile.obj === 'tree' || nextTile.type !== 'ice') {
+                    sliding = false;
+                    if (nextTile.obj !== 'tree') await this.moveVisual(dx, dy);
+                    else AudioEngine.bump(); 
+                } else {
+                    await this.moveVisual(dx, dy, 80);
+                }
+            }
+        }
+
+        moveVisual(dx, dy, speed = 150) {
+            return new Promise(resolve => {
+                const targetX = (this.player.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
+                const targetY = (this.player.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
+                this.tweens.add({
+                    targets: this.catSprite,
+                    x: targetX, y: targetY, duration: speed,
+                    onComplete: () => {
+                        this.player.x += dx; this.player.y += dy;
+                        this.checkLoot(this.player.x, this.player.y);
+                        this.revealFog(this.player.x, this.player.y);
+                        this.updateView();
+                        resolve();
+                    }
+                });
+            });
+        }
+
+        checkLoot(gx, gy) {
+            const tile = this.getTileData(gx, gy);
+            if (!tile.obj || tile.obj === 'tree') return;
+            const wx = gx * this.TILE_SIZE + this.TILE_SIZE/2;
+            const wy = gy * this.TILE_SIZE;
+            if (tile.obj === 'loot') {
+                this.stats.loot++; AudioEngine.coin(); 
+                this.spawnFloater(wx, wy, "+1 🍊", "#fbbf24");
+            } else if (tile.obj === 'coin') {
+                this.stats.coins += 5; AudioEngine.coin(); 
+                this.spawnFloater(wx, wy, "+5 💰", "#ffffff");
+            } else if (tile.obj === 'gift') {
+                this.stats.loot += 5; this.stats.coins += 20; AudioEngine.coin(); 
+                this.spawnFloater(wx, wy, "ПОДАРОК!", "#f472b6");
+            }
+            if(tile.objSprite) {
+                if(Array.isArray(tile.objSprite)) tile.objSprite.forEach(s => s.destroy());
+                else tile.objSprite.destroy();
+            }
+            tile.obj = null; tile.objSprite = null;
+            updateHTMLStats(this.stats);
+        }
+
+        spawnFloater(x, y, text, color) {
+            const txt = this.add.text(x, y, text, {
+                fontFamily: 'Nunito', fontSize: '18px', fontStyle: 'bold', 
+                color: color, stroke: '#000', strokeThickness: 3
+            }).setOrigin(0.5);
+            this.tweens.add({ targets: txt, y: y - 50, alpha: 0, duration: 1000, onComplete: () => txt.destroy() });
+        }
+
+        revealFog(px, py) {
+            const rx = Math.round(px); const ry = Math.round(py);
+            for(let dy=-1; dy<=1; dy++) {
+                for(let dx=-1; dx<=1; dx++) {
+                    this.getTileData(rx+dx, ry+dy).revealed = true;
+                }
+            }
+        }
+    }
+
+    function startGame() {
+        try { AudioEngine.init(); } catch(e) { console.warn("Audio init failed", e); }
+        if (!game) {
+            const config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                backgroundColor: '#020617',
+                scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
+                scene: GameScene,
+                physics: { default: 'arcade', arcade: { debug: false } }
+            };
+            game = new Phaser.Game(config);
+            setTimeout(() => {
+                gameScene = game.scene.scenes[0];
+                document.getElementById('main-menu').classList.add('closed');
+                document.getElementById('game-ui').classList.remove('hidden');
+                isGameActive = true;
+                showLog("Лес ждёт! Тапай рядом с котом 🐱");
+            }, 100);
+        } else {
+            document.getElementById('main-menu').classList.add('closed');
+            document.getElementById('game-ui').classList.remove('hidden');
+            isGameActive = true;
+            showLog("Продолжаем! 🎄");
+        }
+    }
+
+    // --- ФУНКЦИЯ ОТПРАВКИ ДАННЫХ В БОТА И ЗАВЕРШЕНИЯ ИГРЫ ---
+    function finishGame() {
+        if (!gameScene) return;
+        
+        const results = {
+            loot: gameScene.stats.loot,
+            coins: gameScene.stats.coins,
+            // Отправляем текущие координаты кота, чтобы сохранить прогресс
+            x: gameScene.player.x,
+            y: gameScene.player.y
+        };
+        
+        tg.sendData(JSON.stringify(results));
+        // На всякий случай закрываем окно, хотя sendData обычно само закрывает
+        // tg.close(); 
+    }
+
+    function updateHTMLStats(stats) {
+        document.getElementById('energy-txt').innerText = stats.energy;
+        document.getElementById('loot-txt').innerText = stats.loot;
+        document.getElementById('coin-txt').innerText = stats.coins;
+    }
+
+    function showLog(msg) {
+        const el = document.getElementById('log');
+        el.innerText = msg; el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    function toggleFAQ(show) {
+        const el = document.getElementById('faq-modal');
+        if(show) el.classList.add('open'); else el.classList.remove('open');
+    }
+</script>
