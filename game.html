@@ -40,8 +40,8 @@
 
         .top-bar { 
             display: flex; 
-            gap: 5px; /* Уменьшил отступ между блоками */
-            justify-content: space-between; /* Растягиваем по ширине */
+            gap: 5px;
+            justify-content: space-between;
             width: 100%;
         }
 
@@ -49,25 +49,25 @@
             background: var(--ui-glass);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 12px; /* Чуть меньше радиус */
-            padding: 4px 8px;    /* Уменьшил внутренние отступы */
+            border-radius: 12px;
+            padding: 4px 8px;
             display: flex; 
             align-items: center; 
             gap: 4px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-            flex: 1;             /* Блоки будут делить место поровну */
+            flex: 1;
             justify-content: center;
-            min-width: 0;        /* Позволяет сжиматься тексту если надо */
+            min-width: 0;
         }
         
         .stat-val { 
-            font-size: 14px;     /* Чуть меньше шрифт (было 17) */
+            font-size: 14px;
             font-weight: 900; 
             text-shadow: 0 2px 2px rgba(0,0,0,0.5); 
-            white-space: nowrap; /* Запрещаем перенос строк */
+            white-space: nowrap;
         }
         
-        .icon { font-size: 18px; } /* Чуть меньше иконки */
+        .icon { font-size: 18px; }
 
         .bottom-bar {
             display: flex; justify-content: center;
@@ -236,6 +236,7 @@
             <p>🍊 <b>Лут:</b> Собирай Мандарины и Монеты.</p>
             <p>🎁 <b>Подарки:</b> Найди редкие коробки с сюрпризом.</p>
             <p>⚡ <b>Энергия:</b> Тратится на каждый шаг. Если кончится - игра завершится.</p>
+            <p>⚠️ <b>Важно:</b> Не забудь нажать "ЗАБРАТЬ", чтобы сохранить лут!</p>
             <button class="modal-close" onclick="toggleFAQ(false)">ПОНЯТНО</button>
         </div>
     </div>
@@ -245,13 +246,35 @@
     tg.expand();
     tg.ready();
 
-    // 1. Обновляем чтение параметров (добавили energy)
+    // --- СИСТЕМА СОХРАНЕНИЯ ПРОГРЕССА (LocalStorage) ---
+    // Это решает проблему "Перезагрузки". Если игрок обновит страницу,
+    // мы загрузим данные из памяти телефона, а не из ссылки (где старые данные).
+    
+    const GameStateManager = {
+        save: function(token, data) {
+            if (!token || token === '0') return;
+            const key = `catgame_session_${token}`;
+            localStorage.setItem(key, JSON.stringify(data));
+        },
+        load: function(token) {
+            if (!token || token === '0') return null;
+            const key = `catgame_session_${token}`;
+            const data = localStorage.getItem(key);
+            return data ? JSON.parse(data) : null;
+        },
+        clear: function(token) {
+            if (!token || token === '0') return;
+            const key = `catgame_session_${token}`;
+            localStorage.removeItem(key);
+        }
+    };
+
     function getStartParams() {
         const urlParams = new URLSearchParams(window.location.search);
         return {
             x: parseInt(urlParams.get('x')) || 0,
             y: parseInt(urlParams.get('y')) || 0,
-            energy: parseInt(urlParams.get('energy')), // Читаем энергию (может быть 0 или NaN)
+            energy: parseInt(urlParams.get('energy')), 
             token: urlParams.get('token') || '0' 
         };
     }
@@ -260,6 +283,7 @@
     let gameScene = null;
     let isGameActive = false;
 
+    // ... (AudioEngine без изменений, для краткости) ...
     const AudioEngine = {
         ctx: null, masterGain: null, windNode: null, windGain: null, slideNode: null, slideGain: null, isSliding: false,
         init: function() {
@@ -410,17 +434,49 @@
             this.TILE_SIZE = 70;
             this.CHUNK_SIZE = 16;
             this.chunks = new Map();
-            const startParams = getStartParams();
-            this.player = { x: startParams.x, y: startParams.y };
-            
             this.isSliding = false;
-            // 50 Энергии на сессию
-            this.stats = { energy: 50, loot: 0, coins: 0, gifts: 0 };
+            
+            // --- ЗАГРУЗКА СОСТОЯНИЯ ---
+            const params = getStartParams();
+            const saved = GameStateManager.load(params.token);
+            
+            if (saved) {
+                // Если есть сохраненка, грузим её
+                this.player = { x: saved.x, y: saved.y };
+                this.stats = { 
+                    energy: saved.energy, 
+                    loot: saved.loot, 
+                    coins: saved.coins, 
+                    gifts: saved.gifts 
+                };
+                console.log("Restored session:", saved);
+            } else {
+                // Иначе берем из URL
+                this.player = { x: params.x, y: params.y };
+                let startEnergy = 50;
+                if (!isNaN(params.energy)) startEnergy = params.energy;
+                this.stats = { energy: startEnergy, loot: 0, coins: 0, gifts: 0 };
+            }
+            
             this.COLORS = {
                 snowTop: 0xf1f5f9, snowSide: 0x94a3b8,
                 iceTop: 0xbae6fd, iceSide: 0x38bdf8,
                 fog: 0x020617
             };
+        }
+
+        // --- СОХРАНЕНИЕ ПРОГРЕССА ПРИ КАЖДОМ ШАГЕ ---
+        saveProgress() {
+            const params = getStartParams();
+            const state = {
+                x: this.player.x,
+                y: this.player.y,
+                energy: this.stats.energy,
+                loot: this.stats.loot,
+                coins: this.stats.coins,
+                gifts: this.stats.gifts
+            };
+            GameStateManager.save(params.token, state);
         }
 
         create() {
@@ -435,10 +491,8 @@
             this.cameras.main.setBackgroundColor('#020617');
             this.cameras.main.startFollow(this.catSprite, true, 0.1, 0.1);
             
-            // --- ДОБАВЛЕН ЗУМ ---
             this.updateCameraZoom(); 
             this.scale.on('resize', this.updateCameraZoom, this);
-            // --------------------
 
             this.input.on('pointerdown', (pointer) => this.handleInput(pointer));
 
@@ -467,22 +521,13 @@
             this.initMap();
         }
 
-        // --- МЕТОД ДЛЯ АДАПТИВНОГО ЗУМА ---
         updateCameraZoom() {
             const width = this.scale.width;
-            
-            // Мы хотим видеть примерно 8 клеток по ширине.
-            // 8 клеток * 70px = 560px.
-            // Если экран шире 560px, мы приближаем камеру.
             let zoom = width / 560;
-
-            // Ограничиваем зум:
-            if (zoom < 0.8) zoom = 0.8; // Не отдалять слишком сильно на телефонах
-            if (zoom > 2.0) zoom = 2.0; // Не приближать слишком сильно на планшетах
-            
+            if (zoom < 0.8) zoom = 0.8;
+            if (zoom > 2.0) zoom = 2.0;
             this.cameras.main.setZoom(zoom);
         }
-        // ----------------------------------
 
         createCatTexture() {
             const canvas = document.createElement('canvas');
@@ -557,17 +602,7 @@
             this.objGroup.clear(true, true);
             this.chunks.clear();
             
-            const params = getStartParams();
-            this.player = { x: params.x, y: params.y };
-            
-            // 🔥 ВАЖНО: Если энергия передана, используем её. Если нет (NaN) — ставим 50.
-            let startEnergy = 50;
-            if (!isNaN(params.energy)) {
-                startEnergy = params.energy;
-            }
-
-            this.stats = { energy: startEnergy, loot: 0, coins: 0, gifts: 0 };
-            
+            // Здесь мы используем данные, которые могли быть восстановлены в constructor
             const startX = this.player.x * this.TILE_SIZE + this.TILE_SIZE/2;
             const startY = this.player.y * this.TILE_SIZE + this.TILE_SIZE/2;
             this.catSprite.setPosition(startX, startY);
@@ -591,12 +626,10 @@
                     const r = Math.random();
                     if (iceNoise > 0.45) type = 'ice';
                     else {
-                        // --- ИЗМЕНЕНИЕ ШАНСОВ ВЫПАДЕНИЯ ---
                         if (r < 0.12) obj = 'tree';
-                        else if (r < 0.15) obj = 'loot'; // Мандарин (3% вместо 6%)
-                        else if (r < 0.17) obj = 'coin'; // Монетки (2% вместо 6%)
-                        else if (r < 0.175) obj = 'gift'; // Подарок (0.5% вместо 2%)
-                        // ----------------------------------
+                        else if (r < 0.15) obj = 'loot'; 
+                        else if (r < 0.17) obj = 'coin'; 
+                        else if (r < 0.175) obj = 'gift'; 
                     }
                     if (Math.abs(gx) < 2 && Math.abs(gy) < 2) { type = 'snow'; obj = null; }
                     row.push({ gx, gy, type, obj, revealed: false, sprite: null, objSprite: null });
@@ -682,7 +715,6 @@
                 showLog("Сил нет! Нажми Забрать 🎒"); 
                 return; 
             }
-            // ------------------------
             
             const tx = this.player.x + dx;
             const ty = this.player.y + dy;
@@ -699,11 +731,11 @@
             // --- УМЕНЬШЕНИЕ ЭНЕРГИИ ---
             this.stats.energy -= 1; 
             
-            // 🔥 МГНОВЕННОЕ ОБНОВЛЕНИЕ ИНТЕРФЕЙСА 🔥
-            // Мы обновляем текст СРАЗУ, не дожидаясь конца движения
             document.getElementById('energy-txt').innerText = this.stats.energy;
             document.getElementById('coords-txt').innerText = `${tx},${ty}`;
-            // -------------------------------------
+
+            // --- СОХРАНЕНИЕ ПОСЛЕ ШАГА ---
+            this.saveProgress();
 
             await this.moveVisual(dx, dy);
 
@@ -714,6 +746,9 @@
                 
                 this.isSliding = false;
                 AudioEngine.stopSlideSound();
+                
+                // Сохраняем после скольжения тоже
+                this.saveProgress();
             }
         }
 
@@ -727,13 +762,11 @@
                 if (nextTile.obj === 'tree' || nextTile.type !== 'ice') {
                     sliding = false;
                     if (nextTile.obj !== 'tree') {
-                        // 🔥 Обновляем координаты перед анимацией последнего шажка
                         document.getElementById('coords-txt').innerText = `${nx},${ny}`;
                         await this.moveVisual(dx, dy);
                     }
                     else AudioEngine.bump(); 
                 } else {
-                    // 🔥 Обновляем координаты во время скольжения
                     document.getElementById('coords-txt').innerText = `${nx},${ny}`;
                     await this.moveVisual(dx, dy, 80);
                 }
@@ -839,12 +872,13 @@
         }
     }
 
-    // --- ОТПРАВЛЯЕМ ТОКЕН ОБРАТНО ---
     function finishGame() {
         if (!gameScene) return;
         
-        // Берем токен, который мы получили при старте
-        const currentToken = getStartParams().token;
+        const params = getStartParams();
+        
+        // Очищаем сохранение, так как сессия завершена
+        GameStateManager.clear(params.token);
 
         const results = {
             loot: gameScene.stats.loot,
@@ -853,7 +887,7 @@
             x: gameScene.player.x,
             y: gameScene.player.y,
             energy: gameScene.stats.energy,
-            token: currentToken // <--- ВАЖНО: Возвращаем токен боту
+            token: params.token
         };
         
         try {
@@ -868,8 +902,6 @@
         document.getElementById('energy-txt').innerText = stats.energy;
         document.getElementById('loot-txt').innerText = stats.loot;
         document.getElementById('coin-txt').innerText = stats.coins;
-        
-        // Обновляем координаты
         if (gameScene) {
             document.getElementById('coords-txt').innerText = `${gameScene.player.x},${gameScene.player.y}`;
         }
