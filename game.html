@@ -259,23 +259,22 @@
     async function loadFromCloud() {
         updateStatus("Загрузка облака...", true);
         try {
+            // --- ИСПРАВЛЕНИЕ: Заменили .single() на .maybeSingle() ---
             const { data, error } = await supabase.from('users')
                 .select('minigame_state, minigame_energy, minigame_temp_loot')
                 .eq('id', userId)
-                .single();
+                .maybeSingle(); // <--- БЫЛО .single(), СТАЛО .maybeSingle()
 
             if (error) throw error;
 
             if (data) {
-                // Координаты
+                // Если пользователь найден в базе — грузим его прогресс
                 if (data.minigame_state) {
                     sessionData.x = data.minigame_state.x || 0;
                     sessionData.y = data.minigame_state.y || 0;
                 }
-                // Энергия
                 sessionData.energy = data.minigame_energy !== null ? data.minigame_energy : 50;
                 
-                // Временный лут (если играл и вышел)
                 if (data.minigame_temp_loot) {
                     sessionData.loot = data.minigame_temp_loot.loot || 0;
                     sessionData.coins = data.minigame_temp_loot.coins || 0;
@@ -283,9 +282,15 @@
                 }
                 updateStatus("Данные получены!", false);
                 return true;
+            } else {
+                // Если пользователя нет в базе — играем с нуля (дефолтные настройки)
+                console.log("Пользователь не найден в БД, начинаем новую игру.");
+                updateStatus("Новая игра", false);
+                return true;
             }
         } catch (e) {
             console.error("Load error:", e);
+            // Если ошибка сети или другая критическая — всё равно пускаем в игру локально
             updateStatus("Ошибка сети. Играем локально.", false);
         }
         return false;
