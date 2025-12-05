@@ -3,192 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Winter Cat: Cloud Save</title>
+    <title>Winter Cat: Debug Mode</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap" rel="stylesheet">
     
     <style>
-        :root {
-            --bg-deep: #020617;
-            --ui-glass: rgba(15, 23, 42, 0.85);
-            --accent: #38bdf8;
-            --gold: #fbbf24;
-        }
-
-        body {
-            margin: 0;
-            background-color: var(--bg-deep);
-            color: white;
-            font-family: 'Nunito', sans-serif;
-            overflow: hidden;
-            touch-action: none;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-
+        :root { --bg-deep: #020617; --ui-glass: rgba(15, 23, 42, 0.85); --accent: #38bdf8; }
+        body { margin: 0; background-color: var(--bg-deep); color: white; font-family: 'Nunito', sans-serif; overflow: hidden; touch-action: none; user-select: none; -webkit-tap-highlight-color: transparent; }
         #game-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-
-        .ui-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 10;
-            display: flex; flex-direction: column; justify-content: space-between;
-            padding: 15px; box-sizing: border-box;
-            transition: opacity 0.3s;
-        }
+        .ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; padding: 15px; box-sizing: border-box; transition: opacity 0.3s; }
         .hidden { opacity: 0; pointer-events: none; }
-
-        .top-bar { 
-            display: flex; 
-            gap: 5px;
-            justify-content: space-between;
-            width: 100%;
-        }
-
-        .stat-box {
-            background: var(--ui-glass);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 12px;
-            padding: 4px 8px;
-            display: flex; 
-            align-items: center; 
-            gap: 4px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-            flex: 1;
-            justify-content: center;
-            min-width: 0;
-        }
-        
-        .stat-val { 
-            font-size: 14px;
-            font-weight: 900; 
-            text-shadow: 0 2px 2px rgba(0,0,0,0.5); 
-            white-space: nowrap;
-        }
-        
+        .top-bar { display: flex; gap: 5px; justify-content: space-between; width: 100%; }
+        .stat-box { background: var(--ui-glass); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.15); border-radius: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); flex: 1; justify-content: center; min-width: 0; }
+        .stat-val { font-size: 14px; font-weight: 900; text-shadow: 0 2px 2px rgba(0,0,0,0.5); white-space: nowrap; }
         .icon { font-size: 18px; }
-
-        .bottom-bar {
-            display: flex; justify-content: center;
-            align-items: flex-end; 
-            pointer-events: none; padding-bottom: 20px;
-            position: relative;
-            width: 100%;
-            height: 100px;
-        }
-
-        .btn-finish {
-            pointer-events: auto;
-            background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
-            border: none;
-            border-top: 2px solid #86efac;
-            padding: 12px 25px;
-            border-radius: 16px;
-            color: white;
-            font-family: 'Nunito', sans-serif;
-            font-size: 18px; font-weight: 900;
-            box-shadow: 0 4px 15px rgba(22, 163, 74, 0.5);
-            cursor: pointer;
-            text-transform: uppercase;
-            position: absolute;
-            bottom: 10px;
-            right: 0;
-        }
+        .bottom-bar { display: flex; justify-content: center; align-items: flex-end; pointer-events: none; padding-bottom: 20px; position: relative; width: 100%; height: 100px; }
+        .btn-finish { pointer-events: auto; background: linear-gradient(180deg, #22c55e 0%, #16a34a 100%); border: none; border-top: 2px solid #86efac; padding: 12px 25px; border-radius: 16px; color: white; font-family: 'Nunito', sans-serif; font-size: 18px; font-weight: 900; box-shadow: 0 4px 15px rgba(22, 163, 74, 0.5); cursor: pointer; text-transform: uppercase; position: absolute; bottom: 10px; right: 0; }
         .btn-finish:active { transform: scale(0.95); }
-
-        .log-bubble {
-            background: rgba(0,0,0,0.7);
-            color: #bae6fd;
-            padding: 10px 24px;
-            border-radius: 30px;
-            font-size: 15px;
-            font-weight: 800;
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            opacity: 0; transition: opacity 0.3s, transform 0.3s;
-            transform: translateY(20px);
-            backdrop-filter: blur(4px);
-            text-align: center;
-            margin-bottom: 50px;
-        }
+        .log-bubble { background: rgba(0,0,0,0.7); color: #bae6fd; padding: 10px 24px; border-radius: 30px; font-size: 15px; font-weight: 800; border: 1px solid rgba(56, 189, 248, 0.3); opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(20px); backdrop-filter: blur(4px); text-align: center; margin-bottom: 50px; }
         .log-bubble.show { opacity: 1; transform: translateY(0); }
-
-        .menu-screen {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(2, 6, 23, 0.85);
-            backdrop-filter: blur(15px);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 100;
-            transition: opacity 0.5s ease-in-out;
-        }
+        .menu-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(2, 6, 23, 0.85); backdrop-filter: blur(15px); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; transition: opacity 0.5s ease-in-out; }
         .menu-screen.closed { opacity: 0; pointer-events: none; }
-
-        .title {
-            font-size: 42px; font-weight: 900;
-            background: linear-gradient(to bottom, #fff, #7dd3fc);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            margin-bottom: 40px;
-            text-transform: uppercase;
-            filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.6));
-            text-align: center;
-            line-height: 1.1;
-        }
-
-        .btn-play {
-            position: relative;
-            background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%);
-            border: none;
-            border-top: 2px solid #bae6fd;
-            padding: 20px 70px;
-            border-radius: 24px;
-            color: white;
-            font-family: 'Nunito', sans-serif;
-            font-size: 24px; font-weight: 900;
-            box-shadow: 0 10px 30px rgba(2, 132, 199, 0.6), 0 5px 0 #0369a1;
-            cursor: pointer;
-            transition: transform 0.1s;
-            margin-bottom: 20px;
-            text-transform: uppercase;
-        }
+        .title { font-size: 42px; font-weight: 900; background: linear-gradient(to bottom, #fff, #7dd3fc); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 40px; text-transform: uppercase; filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.6)); text-align: center; line-height: 1.1; }
+        .btn-play { position: relative; background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%); border: none; border-top: 2px solid #bae6fd; padding: 20px 70px; border-radius: 24px; color: white; font-family: 'Nunito', sans-serif; font-size: 24px; font-weight: 900; box-shadow: 0 10px 30px rgba(2, 132, 199, 0.6), 0 5px 0 #0369a1; cursor: pointer; transition: transform 0.1s; margin-bottom: 20px; text-transform: uppercase; }
         .btn-play:active { transform: translateY(4px); box-shadow: 0 0 0 #0369a1; }
-
-        .loader {
-            border: 4px solid rgba(255,255,255,0.1);
-            border-left-color: #38bdf8;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            display: none;
-            margin-bottom: 20px;
-        }
+        .loader { border: 4px solid rgba(255,255,255,0.1); border-left-color: #38bdf8; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; display: none; margin-bottom: 20px;}
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        .save-indicator {
-            position: absolute;
-            top: 10px; right: 10px;
-            font-size: 10px; color: #4ade80;
-            opacity: 0; transition: opacity 0.5s;
-            font-weight: bold;
-            display: flex; align-items: center; gap: 4px;
-        }
+        .save-indicator { position: absolute; top: 10px; right: 10px; font-size: 10px; color: #4ade80; opacity: 0; transition: opacity 0.5s; font-weight: bold; display: flex; align-items: center; gap: 4px;}
         .save-indicator.show { opacity: 1; }
-
-        .menu-snow {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 1;
-            background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="2" fill="white" opacity="0.5"/><circle cx="50" cy="80" r="1.5" fill="white" opacity="0.5"/><circle cx="150" cy="30" r="3" fill="white" opacity="0.5"/><circle cx="100" cy="150" r="2" fill="white" opacity="0.5"/></svg>');
-            animation: snowScroll 20s linear infinite;
-        }
+        .menu-snow { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="2" fill="white" opacity="0.5"/><circle cx="50" cy="80" r="1.5" fill="white" opacity="0.5"/><circle cx="150" cy="30" r="3" fill="white" opacity="0.5"/><circle cx="100" cy="150" r="2" fill="white" opacity="0.5"/></svg>'); animation: snowScroll 20s linear infinite; }
         @keyframes snowScroll { from { background-position: 0 0; } to { background-position: 0 500px; } }
+        
+        /* 🔥 ВИЗУАЛЬНАЯ КОНСОЛЬ ДЛЯ ТЕЛЕФОНА 🔥 */
+        #console-log {
+            position: fixed; bottom: 0; left: 0; width: 100%; height: 150px;
+            background: rgba(0,0,0,0.85); color: #00ff00; 
+            font-family: 'Courier New', monospace; font-size: 11px;
+            overflow-y: scroll; z-index: 9999; padding: 8px; 
+            pointer-events: auto; border-top: 2px solid #38bdf8;
+            white-space: pre-wrap; word-break: break-all;
+        }
     </style>
 </head>
 <body>
 
     <div id="game-container"></div>
+    
+    <div id="console-log">🚀 SYSTEM START...<br></div>
 
     <div class="ui-layer hidden" id="game-ui">
         <div class="top-bar">
@@ -221,24 +84,45 @@
         <div class="title">Зимний<br>Кот</div>
         <div class="loader" id="loader"></div>
         <button class="btn-play" id="btn-play" onclick="startGame()">ИГРАТЬ</button>
-        <div style="margin-top:10px; font-size:12px; color:#64748b;" id="status-text">Готов к загрузке...</div>
+        <div style="margin-top:10px; font-size:12px; color:#64748b;" id="status-text">Инициализация...</div>
     </div>
 
 <script>
+    // --- ФУНКЦИЯ ДЛЯ ВЫВОДА ЛОГОВ НА ЭКРАН ---
+    function debugLog(msg) {
+        console.log(msg);
+        const logDiv = document.getElementById('console-log');
+        if (logDiv) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${msg}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+    }
+    
+    // Перехват глобальных ошибок JS
+    window.onerror = function(msg, url, line) {
+        debugLog(`❌ ERROR: ${msg} (Line: ${line})`);
+        return false;
+    };
+
     const tg = window.Telegram.WebApp;
     tg.expand();
     tg.ready();
 
-    // --- НАСТРОЙКИ SUPABASE (Вставлены из tree.html) ---
+    // --- КЛЮЧИ SUPABASE ---
     const SUPABASE_URL = "https://jnavsekwmitcajgvfafk.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpuYXZzZWt3bWl0Y2FqZ3ZmYWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MDU1OTIsImV4cCI6MjA3NDE4MTU5Mn0.0NmAYM2hgzR7emeg45WpoSgqiHYizmtj8dGhMK7FOS4";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let userId = tg.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+    
     // Для тестов в браузере (если нет TG)
     if (!userId) {
         const urlParams = new URLSearchParams(window.location.search);
         userId = urlParams.get('user_id') || 'test_user'; 
+        debugLog("⚠️ UserId из URL/Default: " + userId);
+    } else {
+        debugLog("✅ UserId из Telegram: " + userId);
     }
 
     let game = null;
@@ -247,51 +131,75 @@
     let unsavedChanges = false;
     let saveTimeout = null;
 
-    // Данные сессии
     let sessionData = {
         x: 0, y: 0,
         energy: 50,
         loot: 0, coins: 0, gifts: 0
     };
 
-    // --- ОБЛАЧНОЕ СОХРАНЕНИЕ ---
-    
+    // --- ЛОГИКА ЗАГРУЗКИ С АВТО-СОЗДАНИЕМ ИГРОКА ---
     async function loadFromCloud() {
-        updateStatus("Загрузка облака...", true);
+        updateStatus("Синхронизация...", true);
+        debugLog("📡 Подключение к Supabase...");
+        
         try {
-            // --- ИСПРАВЛЕНИЕ: Заменили .single() на .maybeSingle() ---
-            const { data, error } = await supabase.from('users')
+            // 1. Попытка чтения (без single, чтобы не падало)
+            let { data, error } = await supabase.from('users')
                 .select('minigame_state, minigame_energy, minigame_temp_loot')
-                .eq('id', userId)
-                .maybeSingle(); // <--- БЫЛО .single(), СТАЛО .maybeSingle()
+                .eq('id', userId);
 
-            if (error) throw error;
+            if (error) {
+                debugLog("⛔ Ошибка SELECT: " + JSON.stringify(error));
+                throw error;
+            }
 
-            if (data) {
-                // Если пользователь найден в базе — грузим его прогресс
-                if (data.minigame_state) {
-                    sessionData.x = data.minigame_state.x || 0;
-                    sessionData.y = data.minigame_state.y || 0;
-                }
-                sessionData.energy = data.minigame_energy !== null ? data.minigame_energy : 50;
+            // Проверяем, есть ли данные
+            if (!data || data.length === 0) {
+                debugLog("⚠️ Пользователь не найден. Создаю...");
                 
-                if (data.minigame_temp_loot) {
-                    sessionData.loot = data.minigame_temp_loot.loot || 0;
-                    sessionData.coins = data.minigame_temp_loot.coins || 0;
-                    sessionData.gifts = data.minigame_temp_loot.gifts || 0;
+                // 2. Создание пользователя
+                const newUserData = {
+                    id: userId,
+                    cat_name: 'Кот', 
+                    minigame_energy: 50
+                };
+
+                const { error: insertError } = await supabase.from('users').insert([newUserData]);
+
+                if (insertError) {
+                    debugLog("⛔ Ошибка INSERT: " + JSON.stringify(insertError));
+                    throw insertError;
                 }
-                updateStatus("Данные получены!", false);
-                return true;
-            } else {
-                // Если пользователя нет в базе — играем с нуля (дефолтные настройки)
-                console.log("Пользователь не найден в БД, начинаем новую игру.");
-                updateStatus("Новая игра", false);
+
+                debugLog("✅ Профиль создан успешно!");
+                sessionData = { x: 0, y: 0, energy: 50, loot: 0, coins: 0, gifts: 0 };
+                updateStatus("Профиль создан!", false);
                 return true;
             }
+
+            // 3. Данные найдены
+            debugLog("✅ Профиль найден. Загрузка...");
+            const userData = data[0];
+
+            if (userData.minigame_state) {
+                sessionData.x = userData.minigame_state.x || 0;
+                sessionData.y = userData.minigame_state.y || 0;
+            }
+            sessionData.energy = userData.minigame_energy !== null ? userData.minigame_energy : 50;
+            
+            if (userData.minigame_temp_loot) {
+                sessionData.loot = userData.minigame_temp_loot.loot || 0;
+                sessionData.coins = userData.minigame_temp_loot.coins || 0;
+                sessionData.gifts = userData.minigame_temp_loot.gifts || 0;
+            }
+            
+            debugLog(`📍 Pos: ${sessionData.x},${sessionData.y} ⚡ Energy: ${sessionData.energy}`);
+            updateStatus("Готово!", false);
+            return true;
+
         } catch (e) {
-            console.error("Load error:", e);
-            // Если ошибка сети или другая критическая — всё равно пускаем в игру локально
-            updateStatus("Ошибка сети. Играем локально.", false);
+            debugLog("🔥 CRITICAL ERROR: " + e.message);
+            updateStatus("Ошибка. Играю локально.", false);
         }
         return false;
     }
@@ -311,14 +219,15 @@
             }
         };
 
-        // Визуализация сохранения
         const indicator = document.getElementById('save-icon');
         indicator.classList.add('show');
 
         try {
-            // Вызываем RPC функцию
             const { error } = await supabase.rpc('autosave_game_progress', payload);
-            if (error) throw error;
+            if (error) {
+                debugLog("⚠️ Ошибка автосохранения: " + error.message);
+                throw error;
+            }
             
             unsavedChanges = false;
             setTimeout(() => indicator.classList.remove('show'), 500);
@@ -330,7 +239,6 @@
     function scheduleSave() {
         unsavedChanges = true;
         if (saveTimeout) clearTimeout(saveTimeout);
-        // Сохраняем каждые 2 секунды, если были изменения (Debounce)
         saveTimeout = setTimeout(saveToCloud, 2000);
     }
 
@@ -340,16 +248,21 @@
         document.getElementById('btn-play').style.display = loading ? 'none' : 'block';
     }
 
-    // --- ЗВУКОВОЙ ДВИЖОК ---
+    // --- ДВИЖОК ИГРЫ (PHASER & AUDIO) ---
     const AudioEngine = {
         ctx: null, masterGain: null, windNode: null, windGain: null, slideNode: null, slideGain: null, isSliding: false,
         init: function() {
-            window.AudioContext = window.AudioContext || window.webkitAudioContext;
-            this.ctx = new AudioContext();
-            this.masterGain = this.ctx.createGain();
-            this.masterGain.gain.value = 0.8; 
-            this.masterGain.connect(this.ctx.destination);
-            this.initWind();
+            try {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+                this.masterGain = this.ctx.createGain();
+                this.masterGain.gain.value = 0.8; 
+                this.masterGain.connect(this.ctx.destination);
+                this.initWind();
+                debugLog("🔊 Audio init OK");
+            } catch (e) {
+                debugLog("🔇 Audio init FAIL: " + e.message);
+            }
         },
         initWind: function() {
             if(!this.ctx) return;
@@ -460,7 +373,6 @@
         bump: function() { this.playTone(100, 'square', 0.1, 0.2); }
     };
 
-    // --- ГРАФИКА КОТА ---
     const catSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
     <defs>
         <linearGradient id="fur" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#ffb347;stop-opacity:1" /><stop offset="100%" style="stop-color:#ffcc33;stop-opacity:1" /></linearGradient>
@@ -715,10 +627,8 @@
 
             if(!this.isSliding) AudioEngine.step();
 
-            // Логика хода
             sessionData.energy -= 1;
             
-            // Анимация
             const targetX = (sessionData.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
             const targetY = (sessionData.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
             
@@ -731,7 +641,6 @@
                     this.updateView();
                     updateHTMLStats();
                     
-                    // 🔥 ЗАПУСК АВТОСОХРАНЕНИЯ 🔥
                     scheduleSave();
                     
                     if (tile.type === 'ice') {
@@ -835,7 +744,6 @@
     async function startGame() {
         try { AudioEngine.init(); } catch(e) {}
         
-        // 1. Загружаем данные из облака
         await loadFromCloud();
         
         if (!game) {
@@ -856,16 +764,14 @@
             document.getElementById('main-menu').classList.add('closed');
             document.getElementById('game-ui').classList.remove('hidden');
             isGameActive = true;
-            gameScene.initMap(); // Перерисовка с новыми данными
+            gameScene.initMap(); 
             showLog("Продолжаем! 🎄");
         }
     }
 
     async function finishGame() {
-        // Финальное сохранение
         await saveToCloud();
         
-        // Отправка в бота для начисления постоянной валюты
         const results = {
             loot: sessionData.loot,
             coins: sessionData.coins,
@@ -873,7 +779,7 @@
             x: sessionData.x,
             y: sessionData.y,
             energy: sessionData.energy,
-            final: true // Флаг, что мы закончили
+            final: true
         };
         
         try {
