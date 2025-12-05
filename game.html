@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Christmas Cat: Soft Snow</title>
+    <title>Winter Cat: Cloud Save</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap" rel="stylesheet">
     
@@ -154,35 +155,27 @@
         }
         .btn-play:active { transform: translateY(4px); box-shadow: 0 0 0 #0369a1; }
 
-        .btn-faq {
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            padding: 12px 40px;
-            border-radius: 16px;
-            color: #cbd5e1; font-weight: 700; cursor: pointer;
+        .loader {
+            border: 4px solid rgba(255,255,255,0.1);
+            border-left-color: #38bdf8;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin-bottom: 20px;
         }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        .modal-overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8); z-index: 200;
-            display: flex; align-items: center; justify-content: center;
-            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+        .save-indicator {
+            position: absolute;
+            top: 10px; right: 10px;
+            font-size: 10px; color: #4ade80;
+            opacity: 0; transition: opacity 0.5s;
+            font-weight: bold;
+            display: flex; align-items: center; gap: 4px;
         }
-        .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .modal {
-            background: #1e293b; width: 85%; max-width: 350px;
-            padding: 30px; border-radius: 24px;
-            border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.7); text-align: left;
-        }
-        .modal h2 { margin-top: 0; color: var(--accent); font-size: 24px; margin-bottom: 15px; }
-        .modal p { font-size: 15px; line-height: 1.6; color: #e2e8f0; margin-bottom: 10px; }
-        .modal-close {
-            background: var(--accent); width: 100%; margin-top: 20px;
-            border: none; padding: 14px; border-radius: 16px;
-            color: white; font-weight: 900; font-size: 16px;
-            cursor: pointer;
-        }
+        .save-indicator.show { opacity: 1; }
 
         .menu-snow {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -201,7 +194,7 @@
         <div class="top-bar">
             <div class="stat-box" style="border-bottom: 3px solid #38bdf8;">
                 <span class="icon">⚡</span>
-                <span class="stat-val" id="energy-txt">50</span>
+                <span class="stat-val" id="energy-txt">--</span>
             </div>
             <div class="stat-box" style="border-bottom: 3px solid #888;">
                 <span class="icon">📍</span>
@@ -216,6 +209,7 @@
                 <span class="stat-val" id="coin-txt">0</span>
             </div>
         </div>
+        <div class="save-indicator" id="save-icon">☁️ Saved</div>
         <div class="bottom-bar">
             <div class="log-bubble" id="log"></div>
             <button class="btn-finish" onclick="finishGame()">🎒 ЗАБРАТЬ</button>
@@ -225,20 +219,9 @@
     <div class="menu-screen" id="main-menu">
         <div class="menu-snow"></div>
         <div class="title">Зимний<br>Кот</div>
-        <button class="btn-play" onclick="startGame()">ИГРАТЬ</button>
-        <button class="btn-faq" onclick="toggleFAQ(true)">❓ ПРАВИЛА</button>
-    </div>
-
-    <div class="modal-overlay" id="faq-modal">
-        <div class="modal">
-            <h2>Правила</h2>
-            <p>❄️ <b>Бесконечный лес:</b> Карта генерируется на ходу.</p>
-            <p>🍊 <b>Лут:</b> Собирай Мандарины и Монеты.</p>
-            <p>🎁 <b>Подарки:</b> Найди редкие коробки с сюрпризом.</p>
-            <p>⚡ <b>Энергия:</b> Тратится на каждый шаг. Если кончится - игра завершится.</p>
-            <p>⚠️ <b>Важно:</b> Не забудь нажать "ЗАБРАТЬ", чтобы сохранить лут!</p>
-            <button class="modal-close" onclick="toggleFAQ(false)">ПОНЯТНО</button>
-        </div>
+        <div class="loader" id="loader"></div>
+        <button class="btn-play" id="btn-play" onclick="startGame()">ИГРАТЬ</button>
+        <div style="margin-top:10px; font-size:12px; color:#64748b;" id="status-text">Готов к загрузке...</div>
     </div>
 
 <script>
@@ -246,44 +229,113 @@
     tg.expand();
     tg.ready();
 
-    // --- СИСТЕМА СОХРАНЕНИЯ ПРОГРЕССА (LocalStorage) ---
-    // Это решает проблему "Перезагрузки". Если игрок обновит страницу,
-    // мы загрузим данные из памяти телефона, а не из ссылки (где старые данные).
-    
-    const GameStateManager = {
-        save: function(token, data) {
-            if (!token || token === '0') return;
-            const key = `catgame_session_${token}`;
-            localStorage.setItem(key, JSON.stringify(data));
-        },
-        load: function(token) {
-            if (!token || token === '0') return null;
-            const key = `catgame_session_${token}`;
-            const data = localStorage.getItem(key);
-            return data ? JSON.parse(data) : null;
-        },
-        clear: function(token) {
-            if (!token || token === '0') return;
-            const key = `catgame_session_${token}`;
-            localStorage.removeItem(key);
-        }
-    };
+    // --- НАСТРОЙКИ SUPABASE (Вставлены из tree.html) ---
+    const SUPABASE_URL = "https://jnavsekwmitcajgvfafk.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpuYXZzZWt3bWl0Y2FqZ3ZmYWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MDU1OTIsImV4cCI6MjA3NDE4MTU5Mn0.0NmAYM2hgzR7emeg45WpoSgqiHYizmtj8dGhMK7FOS4";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    function getStartParams() {
+    let userId = tg.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
+    // Для тестов в браузере (если нет TG)
+    if (!userId) {
         const urlParams = new URLSearchParams(window.location.search);
-        return {
-            x: parseInt(urlParams.get('x')) || 0,
-            y: parseInt(urlParams.get('y')) || 0,
-            energy: parseInt(urlParams.get('energy')), 
-            token: urlParams.get('token') || '0' 
-        };
+        userId = urlParams.get('user_id') || 'test_user'; 
     }
 
     let game = null;
     let gameScene = null;
     let isGameActive = false;
+    let unsavedChanges = false;
+    let saveTimeout = null;
 
-    // ... (AudioEngine без изменений, для краткости) ...
+    // Данные сессии
+    let sessionData = {
+        x: 0, y: 0,
+        energy: 50,
+        loot: 0, coins: 0, gifts: 0
+    };
+
+    // --- ОБЛАЧНОЕ СОХРАНЕНИЕ ---
+    
+    async function loadFromCloud() {
+        updateStatus("Загрузка облака...", true);
+        try {
+            const { data, error } = await supabase.from('users')
+                .select('minigame_state, minigame_energy, minigame_temp_loot')
+                .eq('id', userId)
+                .single();
+
+            if (error) throw error;
+
+            if (data) {
+                // Координаты
+                if (data.minigame_state) {
+                    sessionData.x = data.minigame_state.x || 0;
+                    sessionData.y = data.minigame_state.y || 0;
+                }
+                // Энергия
+                sessionData.energy = data.minigame_energy !== null ? data.minigame_energy : 50;
+                
+                // Временный лут (если играл и вышел)
+                if (data.minigame_temp_loot) {
+                    sessionData.loot = data.minigame_temp_loot.loot || 0;
+                    sessionData.coins = data.minigame_temp_loot.coins || 0;
+                    sessionData.gifts = data.minigame_temp_loot.gifts || 0;
+                }
+                updateStatus("Данные получены!", false);
+                return true;
+            }
+        } catch (e) {
+            console.error("Load error:", e);
+            updateStatus("Ошибка сети. Играем локально.", false);
+        }
+        return false;
+    }
+
+    async function saveToCloud() {
+        if (!unsavedChanges) return;
+        
+        const payload = {
+            p_user_id: userId,
+            p_x: sessionData.x,
+            p_y: sessionData.y,
+            p_energy: sessionData.energy,
+            p_loot: { 
+                loot: sessionData.loot, 
+                coins: sessionData.coins, 
+                gifts: sessionData.gifts 
+            }
+        };
+
+        // Визуализация сохранения
+        const indicator = document.getElementById('save-icon');
+        indicator.classList.add('show');
+
+        try {
+            // Вызываем RPC функцию
+            const { error } = await supabase.rpc('autosave_game_progress', payload);
+            if (error) throw error;
+            
+            unsavedChanges = false;
+            setTimeout(() => indicator.classList.remove('show'), 500);
+        } catch (e) {
+            console.error("Save error:", e);
+        }
+    }
+
+    function scheduleSave() {
+        unsavedChanges = true;
+        if (saveTimeout) clearTimeout(saveTimeout);
+        // Сохраняем каждые 2 секунды, если были изменения (Debounce)
+        saveTimeout = setTimeout(saveToCloud, 2000);
+    }
+
+    function updateStatus(msg, loading) {
+        document.getElementById('status-text').innerText = msg;
+        document.getElementById('loader').style.display = loading ? 'block' : 'none';
+        document.getElementById('btn-play').style.display = loading ? 'none' : 'block';
+    }
+
+    // --- ЗВУКОВОЙ ДВИЖОК ---
     const AudioEngine = {
         ctx: null, masterGain: null, windNode: null, windGain: null, slideNode: null, slideGain: null, isSliding: false,
         init: function() {
@@ -403,6 +455,7 @@
         bump: function() { this.playTone(100, 'square', 0.1, 0.2); }
     };
 
+    // --- ГРАФИКА КОТА ---
     const catSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
     <defs>
         <linearGradient id="fur" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#ffb347;stop-opacity:1" /><stop offset="100%" style="stop-color:#ffcc33;stop-opacity:1" /></linearGradient>
@@ -436,47 +489,11 @@
             this.chunks = new Map();
             this.isSliding = false;
             
-            // --- ЗАГРУЗКА СОСТОЯНИЯ ---
-            const params = getStartParams();
-            const saved = GameStateManager.load(params.token);
-            
-            if (saved) {
-                // Если есть сохраненка, грузим её
-                this.player = { x: saved.x, y: saved.y };
-                this.stats = { 
-                    energy: saved.energy, 
-                    loot: saved.loot, 
-                    coins: saved.coins, 
-                    gifts: saved.gifts 
-                };
-                console.log("Restored session:", saved);
-            } else {
-                // Иначе берем из URL
-                this.player = { x: params.x, y: params.y };
-                let startEnergy = 50;
-                if (!isNaN(params.energy)) startEnergy = params.energy;
-                this.stats = { energy: startEnergy, loot: 0, coins: 0, gifts: 0 };
-            }
-            
             this.COLORS = {
                 snowTop: 0xf1f5f9, snowSide: 0x94a3b8,
                 iceTop: 0xbae6fd, iceSide: 0x38bdf8,
                 fog: 0x020617
             };
-        }
-
-        // --- СОХРАНЕНИЕ ПРОГРЕССА ПРИ КАЖДОМ ШАГЕ ---
-        saveProgress() {
-            const params = getStartParams();
-            const state = {
-                x: this.player.x,
-                y: this.player.y,
-                energy: this.stats.energy,
-                loot: this.stats.loot,
-                coins: this.stats.coins,
-                gifts: this.stats.gifts
-            };
-            GameStateManager.save(params.token, state);
         }
 
         create() {
@@ -487,49 +504,7 @@
             const catText = this.add.text(0, 0, '🐱', { fontSize: '50px' }).setOrigin(0.5, 0.8).setDepth(100);
             this.catSprite = catText;
 
-            this.createCatTexture();
-            this.cameras.main.setBackgroundColor('#020617');
-            this.cameras.main.startFollow(this.catSprite, true, 0.1, 0.1);
-            
-            this.updateCameraZoom(); 
-            this.scale.on('resize', this.updateCameraZoom, this);
-
-            this.input.on('pointerdown', (pointer) => this.handleInput(pointer));
-
-            const snowG = this.make.graphics({x:0, y:0, add:false});
-            snowG.fillStyle(0xffffff, 0.8);
-            snowG.fillCircle(4, 4, 3);
-            snowG.generateTexture('snowflake', 8, 8);
-            
-            const maxW = Math.max(window.innerWidth, window.innerHeight) * 2;
-            const emitter = this.add.particles(0, 0, 'snowflake', {
-                x: { min: -maxW/2, max: maxW/2 },
-                y: -50,
-                lifespan: 6000,
-                speedY: { min: 30, max: 80 },
-                speedX: { min: -20, max: 20 },
-                scale: { start: 0.8, end: 0.2 },
-                alpha: { start: 0.6, end: 0 },
-                quantity: 2,
-                frequency: 100,
-                blendMode: 'ADD',
-                emitting: true
-            });
-            emitter.setScrollFactor(0); 
-            emitter.setDepth(200);
-
-            this.initMap();
-        }
-
-        updateCameraZoom() {
-            const width = this.scale.width;
-            let zoom = width / 560;
-            if (zoom < 0.8) zoom = 0.8;
-            if (zoom > 2.0) zoom = 2.0;
-            this.cameras.main.setZoom(zoom);
-        }
-
-        createCatTexture() {
+            // Грузим картинку из SVG
             const canvas = document.createElement('canvas');
             canvas.width = 200; canvas.height = 200;
             const ctx = canvas.getContext('2d');
@@ -548,39 +523,52 @@
                 }
             };
             img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(catSvg);
+
+            this.cameras.main.setBackgroundColor('#020617');
+            this.cameras.main.startFollow(this.catSprite, true, 0.1, 0.1);
+            
+            this.updateCameraZoom();
+            this.scale.on('resize', this.updateCameraZoom, this);
+            
+            this.input.on('pointerdown', (pointer) => this.handleInput(pointer));
+            this.initMap();
+        }
+
+        updateCameraZoom() {
+            const width = this.scale.width;
+            let zoom = width / 560;
+            if (zoom < 0.8) zoom = 0.8; if (zoom > 2.0) zoom = 2.0;
+            this.cameras.main.setZoom(zoom);
         }
 
         createTextures() {
             const g = this.make.graphics({x:0, y:0, add:false});
             const ts = this.TILE_SIZE;
             g.clear();
-            g.fillStyle(this.COLORS.snowSide); 
-            g.fillRect(2, ts/2 + 2, ts-4, (ts/2)+4);
-            g.fillStyle(this.COLORS.snowTop);  
-            g.fillRoundedRect(2, 2, ts-4, ts-4, 4);
+            g.fillStyle(this.COLORS.snowSide); g.fillRect(2, ts/2 + 2, ts-4, (ts/2)+4);
+            g.fillStyle(this.COLORS.snowTop); g.fillRoundedRect(2, 2, ts-4, ts-4, 4);
             g.generateTexture('tile_snow', ts, ts);
+            
             g.clear();
-            g.fillStyle(this.COLORS.iceSide); 
-            g.fillRect(2, ts/2 + 2, ts-4, ts/2 + 4);
-            g.fillStyle(this.COLORS.iceTop);  
-            g.fillRoundedRect(2, 2, ts-4, ts-4, 4);
+            g.fillStyle(this.COLORS.iceSide); g.fillRect(2, ts/2 + 2, ts-4, ts/2 + 4);
+            g.fillStyle(this.COLORS.iceTop); g.fillRoundedRect(2, 2, ts-4, ts-4, 4);
             g.fillStyle(0xffffff, 0.4); 
-            g.beginPath(); 
-            g.moveTo(10, ts-15); g.lineTo(ts-15, 15); g.lineTo(ts-25, 15); g.lineTo(10, ts-25); 
+            g.beginPath(); g.moveTo(10, ts-15); g.lineTo(ts-15, 15); g.lineTo(ts-25, 15); g.lineTo(10, ts-25); 
             g.fillPath();
             g.generateTexture('tile_ice', ts, ts);
+
             g.clear();
-            g.fillStyle(this.COLORS.fog); 
-            g.fillRect(0, 0, ts, ts);
+            g.fillStyle(this.COLORS.fog); g.fillRect(0, 0, ts, ts);
             g.generateTexture('tile_fog', ts, ts);
             g.destroy();
+            
             this.createEmojiTexture('tex_tree', '🎄', 50, '#22c55e', true);
             this.createEmojiTexture('tex_star', '⭐', 20, '#fbbf24', true);
             this.createEmojiTexture('tex_orange', '🍊', 30, '#fbbf24', true);
             this.createEmojiTexture('tex_coin', '💰', 30, '#ffffff', true);
             this.createEmojiTexture('tex_gift', '🎁', 30, '#f472b6', true);
         }
-
+        
         createEmojiTexture(key, emoji, fontSize, glowColor, circleOutline) {
             const canvas = document.createElement('canvas');
             canvas.width = 80; canvas.height = 80;
@@ -602,14 +590,14 @@
             this.objGroup.clear(true, true);
             this.chunks.clear();
             
-            // Здесь мы используем данные, которые могли быть восстановлены в constructor
-            const startX = this.player.x * this.TILE_SIZE + this.TILE_SIZE/2;
-            const startY = this.player.y * this.TILE_SIZE + this.TILE_SIZE/2;
+            // Используем sessionData, загруженные из облака
+            const startX = sessionData.x * this.TILE_SIZE + this.TILE_SIZE/2;
+            const startY = sessionData.y * this.TILE_SIZE + this.TILE_SIZE/2;
             this.catSprite.setPosition(startX, startY);
             
-            this.revealFog(this.player.x, this.player.y);
+            this.revealFog(sessionData.x, sessionData.y);
             this.updateView();
-            updateHTMLStats(this.stats);
+            updateHTMLStats();
         }
 
         getChunk(cx, cy) {
@@ -624,6 +612,7 @@
                     let type = 'snow'; let obj = null;
                     const iceNoise = Math.sin(gx * 0.2) * Math.cos(gy * 0.2);
                     const r = Math.random();
+                    
                     if (iceNoise > 0.45) type = 'ice';
                     else {
                         if (r < 0.12) obj = 'tree';
@@ -651,8 +640,8 @@
 
         updateView() {
             const range = 6;
-            const px = this.player.x;
-            const py = this.player.y;
+            const px = sessionData.x;
+            const py = sessionData.y;
 
             for(let dy = -range; dy <= range; dy++) {
                 for(let dx = -range; dx <= range; dx++) {
@@ -669,6 +658,7 @@
                     if (tile.revealed) {
                         const texKey = tile.type === 'ice' ? 'tile_ice' : 'tile_snow';
                         if(tile.sprite.texture.key !== texKey) tile.sprite.setTexture(texKey);
+                        
                         if(tile.obj && !tile.objSprite) {
                             if(tile.obj === 'tree') {
                                 const tree = this.add.image(wx, wy - 10, 'tex_tree');
@@ -704,91 +694,90 @@
             const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
             const gx = Math.floor(worldPoint.x / this.TILE_SIZE);
             const gy = Math.floor(worldPoint.y / this.TILE_SIZE);
-            if (Math.abs(gx - this.player.x) + Math.abs(gy - this.player.y) === 1) {
-                this.step(gx - this.player.x, gy - this.player.y);
+            if (Math.abs(gx - sessionData.x) + Math.abs(gy - sessionData.y) === 1) {
+                this.step(gx - sessionData.x, gy - sessionData.y);
             }
         }
 
         async step(dx, dy) {
-            // --- ПРОВЕРКА ЭНЕРГИИ ---
-            if (this.stats.energy <= 0) { 
-                showLog("Сил нет! Нажми Забрать 🎒"); 
-                return; 
-            }
+            if (sessionData.energy <= 0) { showLog("Сил нет! Нажми Забрать 🎒"); return; }
             
-            const tx = this.player.x + dx;
-            const ty = this.player.y + dy;
+            const tx = sessionData.x + dx;
+            const ty = sessionData.y + dy;
             const tile = this.getTileData(tx, ty);
 
-            if (tile.obj === 'tree') { 
-                AudioEngine.bump(); 
-                showLog("Ёлка! 🎄"); 
-                return; 
-            }
+            if (tile.obj === 'tree') { AudioEngine.bump(); showLog("Ёлка! 🎄"); return; }
 
-            if(!this.isSliding) AudioEngine.step(); 
+            if(!this.isSliding) AudioEngine.step();
 
-            // --- УМЕНЬШЕНИЕ ЭНЕРГИИ ---
-            this.stats.energy -= 1; 
+            // Логика хода
+            sessionData.energy -= 1;
             
-            document.getElementById('energy-txt').innerText = this.stats.energy;
-            document.getElementById('coords-txt').innerText = `${tx},${ty}`;
-
-            // --- СОХРАНЕНИЕ ПОСЛЕ ШАГА ---
-            this.saveProgress();
-
-            await this.moveVisual(dx, dy);
-
-            if (tile.type === 'ice') {
-                this.isSliding = true;
-                AudioEngine.startSlideSound();
-                await this.slideLoop(dx, dy);
-                
+            // Анимация
+            const targetX = (sessionData.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
+            const targetY = (sessionData.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
+            
+            this.tweens.add({
+                targets: this.catSprite, x: targetX, y: targetY, duration: 150,
+                onComplete: () => {
+                    sessionData.x += dx; sessionData.y += dy;
+                    this.checkLoot(sessionData.x, sessionData.y);
+                    this.revealFog(sessionData.x, sessionData.y);
+                    this.updateView();
+                    updateHTMLStats();
+                    
+                    // 🔥 ЗАПУСК АВТОСОХРАНЕНИЯ 🔥
+                    scheduleSave();
+                    
+                    if (tile.type === 'ice') {
+                        this.isSliding = true;
+                        AudioEngine.startSlideSound();
+                        this.slideLoop(dx, dy);
+                    }
+                }
+            });
+        }
+        
+        slideLoop(dx, dy) {
+            const nx = sessionData.x + dx;
+            const ny = sessionData.y + dy;
+            const nextTile = this.getTileData(nx, ny);
+            
+            if (nextTile.obj === 'tree' || nextTile.type !== 'ice') {
                 this.isSliding = false;
                 AudioEngine.stopSlideSound();
-                
-                // Сохраняем после скольжения тоже
-                this.saveProgress();
-            }
-        }
-
-        async slideLoop(dx, dy) {
-            let sliding = true;
-            while (sliding) {
-                const nx = this.player.x + dx;
-                const ny = this.player.y + dy;
-                const nextTile = this.getTileData(nx, ny);
-                
-                if (nextTile.obj === 'tree' || nextTile.type !== 'ice') {
-                    sliding = false;
-                    if (nextTile.obj !== 'tree') {
-                        document.getElementById('coords-txt').innerText = `${nx},${ny}`;
-                        await this.moveVisual(dx, dy);
-                    }
-                    else AudioEngine.bump(); 
-                } else {
-                    document.getElementById('coords-txt').innerText = `${nx},${ny}`;
-                    await this.moveVisual(dx, dy, 80);
+                scheduleSave();
+                if (nextTile.obj === 'tree') AudioEngine.bump();
+                else {
+                    const tx = (sessionData.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
+                    const ty = (sessionData.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
+                    this.tweens.add({
+                        targets: this.catSprite, x: tx, y: ty, duration: 150,
+                        onComplete: () => {
+                            sessionData.x += dx; sessionData.y += dy;
+                            this.checkLoot(sessionData.x, sessionData.y);
+                            this.revealFog(sessionData.x, sessionData.y);
+                            this.updateView();
+                            updateHTMLStats();
+                            scheduleSave();
+                        }
+                    });
                 }
-            }
-        }
-
-        moveVisual(dx, dy, speed = 150) {
-            return new Promise(resolve => {
-                const targetX = (this.player.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
-                const targetY = (this.player.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
+            } else {
+                const tx = (sessionData.x + dx) * this.TILE_SIZE + this.TILE_SIZE/2;
+                const ty = (sessionData.y + dy) * this.TILE_SIZE + this.TILE_SIZE/2;
                 this.tweens.add({
-                    targets: this.catSprite,
-                    x: targetX, y: targetY, duration: speed,
+                    targets: this.catSprite, x: tx, y: ty, duration: 80,
                     onComplete: () => {
-                        this.player.x += dx; this.player.y += dy;
-                        this.checkLoot(this.player.x, this.player.y);
-                        this.revealFog(this.player.x, this.player.y);
+                        sessionData.x += dx; sessionData.y += dy;
+                        this.checkLoot(sessionData.x, sessionData.y);
+                        this.revealFog(sessionData.x, sessionData.y);
                         this.updateView();
-                        resolve();
+                        updateHTMLStats();
+                        this.slideLoop(dx, dy);
                     }
                 });
-            });
+            }
         }
 
         checkLoot(gx, gy) {
@@ -797,20 +786,20 @@
             
             const wx = gx * this.TILE_SIZE + this.TILE_SIZE / 2;
             const wy = gy * this.TILE_SIZE + this.TILE_SIZE / 2;
-        
-            if (tile.obj === 'loot') {
-                this.stats.loot++; 
-                AudioEngine.coin(); 
+            
+            if (tile.obj === 'loot') { 
+                sessionData.loot++; 
+                AudioEngine.coin();
                 this.spawnFloater(wx, wy, "+1 🍊", "#fbbf24");
             } 
-            else if (tile.obj === 'coin') {
-                this.stats.coins += 5; 
-                AudioEngine.coin(); 
+            else if (tile.obj === 'coin') { 
+                sessionData.coins += 5; 
+                AudioEngine.coin();
                 this.spawnFloater(wx, wy, "+5 💰", "#ffffff");
             } 
-            else if (tile.obj === 'gift') {
-                this.stats.gifts++; 
-                AudioEngine.coin(); 
+            else if (tile.obj === 'gift') { 
+                sessionData.gifts++; 
+                AudioEngine.coin();
                 this.spawnFloater(wx, wy, "+1 🎁", "#f472b6");
             }
         
@@ -819,9 +808,8 @@
                 else tile.objSprite.destroy();
             }
             tile.obj = null; tile.objSprite = null;
-            updateHTMLStats(this.stats);
         }
-
+        
         spawnFloater(x, y, text, color) {
             const txt = this.add.text(x, y, text, {
                 fontFamily: 'Nunito', fontSize: '18px', fontStyle: 'bold', 
@@ -831,30 +819,25 @@
         }
 
         revealFog(px, py) {
-            const rx = Math.round(px); const ry = Math.round(py);
             for(let dy=-1; dy<=1; dy++) {
                 for(let dx=-1; dx<=1; dx++) {
-                    this.getTileData(rx+dx, ry+dy).revealed = true;
+                    this.getTileData(px+dx, py+dy).revealed = true;
                 }
             }
         }
     }
 
-    function startGame() {
-        try {
-            AudioEngine.init();
-        } catch(e) {
-            console.warn("Audio init failed", e);
-        }
+    async function startGame() {
+        try { AudioEngine.init(); } catch(e) {}
+        
+        // 1. Загружаем данные из облака
+        await loadFromCloud();
         
         if (!game) {
             const config = {
-                type: Phaser.AUTO,
-                parent: 'game-container',
-                backgroundColor: '#020617',
+                type: Phaser.AUTO, parent: 'game-container', backgroundColor: '#020617',
                 scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
-                scene: GameScene,
-                physics: { default: 'arcade', arcade: { debug: false } }
+                scene: GameScene, physics: { default: 'arcade', arcade: { debug: false } }
             };
             game = new Phaser.Game(config);
             setTimeout(() => {
@@ -868,26 +851,24 @@
             document.getElementById('main-menu').classList.add('closed');
             document.getElementById('game-ui').classList.remove('hidden');
             isGameActive = true;
+            gameScene.initMap(); // Перерисовка с новыми данными
             showLog("Продолжаем! 🎄");
         }
     }
 
-    function finishGame() {
-        if (!gameScene) return;
+    async function finishGame() {
+        // Финальное сохранение
+        await saveToCloud();
         
-        const params = getStartParams();
-        
-        // Очищаем сохранение, так как сессия завершена
-        GameStateManager.clear(params.token);
-
+        // Отправка в бота для начисления постоянной валюты
         const results = {
-            loot: gameScene.stats.loot,
-            coins: gameScene.stats.coins,
-            gifts: gameScene.stats.gifts,
-            x: gameScene.player.x,
-            y: gameScene.player.y,
-            energy: gameScene.stats.energy,
-            token: params.token
+            loot: sessionData.loot,
+            coins: sessionData.coins,
+            gifts: sessionData.gifts,
+            x: sessionData.x,
+            y: sessionData.y,
+            energy: sessionData.energy,
+            final: true // Флаг, что мы закончили
         };
         
         try {
@@ -898,25 +879,17 @@
         }
     }
 
-    function updateHTMLStats(stats) {
-        document.getElementById('energy-txt').innerText = stats.energy;
-        document.getElementById('loot-txt').innerText = stats.loot;
-        document.getElementById('coin-txt').innerText = stats.coins;
-        if (gameScene) {
-            document.getElementById('coords-txt').innerText = `${gameScene.player.x},${gameScene.player.y}`;
-        }
+    function updateHTMLStats() {
+        document.getElementById('energy-txt').innerText = sessionData.energy;
+        document.getElementById('loot-txt').innerText = sessionData.loot;
+        document.getElementById('coin-txt').innerText = sessionData.coins;
+        document.getElementById('coords-txt').innerText = `${sessionData.x},${sessionData.y}`;
     }
 
     function showLog(msg) {
         const el = document.getElementById('log');
-        el.innerText = msg; 
-        el.classList.add('show');
-        setTimeout(() => el.classList.remove('show'), 2500);
-    }
-
-    function toggleFAQ(show) {
-        const el = document.getElementById('faq-modal');
-        if(show) el.classList.add('open'); else el.classList.remove('open');
+        el.innerText = msg; el.classList.add('show');
+        setTimeout(() => el.classList.remove('show'), 2000);
     }
 </script>
 </body>
