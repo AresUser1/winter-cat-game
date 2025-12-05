@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Winter Cat: Debug Mode</title>
+    <title>Winter Cat: Cloud Save</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
@@ -35,23 +35,11 @@
         .save-indicator.show { opacity: 1; }
         .menu-snow { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="2" fill="white" opacity="0.5"/><circle cx="50" cy="80" r="1.5" fill="white" opacity="0.5"/><circle cx="150" cy="30" r="3" fill="white" opacity="0.5"/><circle cx="100" cy="150" r="2" fill="white" opacity="0.5"/></svg>'); animation: snowScroll 20s linear infinite; }
         @keyframes snowScroll { from { background-position: 0 0; } to { background-position: 0 500px; } }
-        
-        /* 🔥 ВИЗУАЛЬНАЯ КОНСОЛЬ ДЛЯ ТЕЛЕФОНА 🔥 */
-        #console-log {
-            position: fixed; bottom: 0; left: 0; width: 100%; height: 150px;
-            background: rgba(0,0,0,0.85); color: #00ff00; 
-            font-family: 'Courier New', monospace; font-size: 11px;
-            overflow-y: scroll; z-index: 9999; padding: 8px; 
-            pointer-events: auto; border-top: 2px solid #38bdf8;
-            white-space: pre-wrap; word-break: break-all;
-        }
     </style>
 </head>
 <body>
 
     <div id="game-container"></div>
-    
-    <div id="console-log">🚀 SYSTEM START...<br></div>
 
     <div class="ui-layer hidden" id="game-ui">
         <div class="top-bar">
@@ -84,46 +72,34 @@
         <div class="title">Зимний<br>Кот</div>
         <div class="loader" id="loader"></div>
         <button class="btn-play" id="btn-play" onclick="startGame()">ИГРАТЬ</button>
-        <div style="margin-top:10px; font-size:12px; color:#64748b;" id="status-text">Инициализация...</div>
+        <div style="margin-top:10px; font-size:12px; color:#64748b;" id="status-text">Загрузка...</div>
     </div>
 
 <script>
-    // --- ФУНКЦИЯ ДЛЯ ВЫВОДА ЛОГОВ НА ЭКРАН ---
-    function debugLog(msg) {
-        console.log(msg);
-        const logDiv = document.getElementById('console-log');
-        if (logDiv) {
-            const time = new Date().toLocaleTimeString();
-            logDiv.innerHTML += `[${time}] ${msg}<br>`;
-            logDiv.scrollTop = logDiv.scrollHeight;
-        }
-    }
-    
-    // Перехват глобальных ошибок JS
-    window.onerror = function(msg, url, line) {
-        debugLog(`❌ ERROR: ${msg} (Line: ${line})`);
-        return false;
-    };
-
     const tg = window.Telegram.WebApp;
     tg.expand();
     tg.ready();
 
-    // --- КЛЮЧИ SUPABASE ---
+    // --- НАСТРОЙКИ SUPABASE ---
     const SUPABASE_URL = "https://jnavsekwmitcajgvfafk.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpuYXZzZWt3bWl0Y2FqZ3ZmYWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg2MDU1OTIsImV4cCI6MjA3NDE4MTU5Mn0.0NmAYM2hgzR7emeg45WpoSgqiHYizmtj8dGhMK7FOS4";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+    // --- ПОЛУЧЕНИЕ USER ID (НАДЕЖНОЕ) ---
     let userId = tg.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null;
     
-    // Для тестов в браузере (если нет TG)
+    // Если Telegram не дал ID (бывает в WebApp), берем из URL
     if (!userId) {
         const urlParams = new URLSearchParams(window.location.search);
-        userId = urlParams.get('user_id') || 'test_user'; 
-        debugLog("⚠️ UserId из URL/Default: " + userId);
-    } else {
-        debugLog("✅ UserId из Telegram: " + userId);
+        userId = urlParams.get('user_id');
+        
+        if (!userId) {
+            console.warn("User ID not found! Using fallback.");
+            userId = 'test_user'; // Крайний случай
+        }
     }
+    
+    console.log("Playing as User ID:", userId);
 
     let game = null;
     let gameScene = null;
@@ -140,47 +116,34 @@
     // --- ЛОГИКА ЗАГРУЗКИ С АВТО-СОЗДАНИЕМ ИГРОКА ---
     async function loadFromCloud() {
         updateStatus("Синхронизация...", true);
-        debugLog("📡 Подключение к Supabase...");
-        
         try {
-            // 1. Попытка чтения (без single, чтобы не падало)
+            // 1. Пытаемся найти пользователя (без single(), чтобы избежать ошибки PGRST116)
             let { data, error } = await supabase.from('users')
                 .select('minigame_state, minigame_energy, minigame_temp_loot')
                 .eq('id', userId);
 
-            if (error) {
-                debugLog("⛔ Ошибка SELECT: " + JSON.stringify(error));
-                throw error;
-            }
+            if (error) throw error;
 
-            // Проверяем, есть ли данные
+            // 2. Если пользователя НЕТ (data пуст) -> СОЗДАЕМ ЕГО
             if (!data || data.length === 0) {
-                debugLog("⚠️ Пользователь не найден. Создаю...");
+                console.log("Пользователь не найден. Создаем нового...");
                 
-                // 2. Создание пользователя
-                const newUserData = {
+                const { error: insertError } = await supabase.from('users').insert([{
                     id: userId,
                     cat_name: 'Кот', 
                     minigame_energy: 50
-                };
+                }]);
 
-                const { error: insertError } = await supabase.from('users').insert([newUserData]);
+                if (insertError) throw insertError;
 
-                if (insertError) {
-                    debugLog("⛔ Ошибка INSERT: " + JSON.stringify(insertError));
-                    throw insertError;
-                }
-
-                debugLog("✅ Профиль создан успешно!");
+                // Сразу устанавливаем дефолтные значения
                 sessionData = { x: 0, y: 0, energy: 50, loot: 0, coins: 0, gifts: 0 };
                 updateStatus("Профиль создан!", false);
                 return true;
             }
 
-            // 3. Данные найдены
-            debugLog("✅ Профиль найден. Загрузка...");
+            // 3. Если пользователь ЕСТЬ -> Грузим данные
             const userData = data[0];
-
             if (userData.minigame_state) {
                 sessionData.x = userData.minigame_state.x || 0;
                 sessionData.y = userData.minigame_state.y || 0;
@@ -192,14 +155,13 @@
                 sessionData.coins = userData.minigame_temp_loot.coins || 0;
                 sessionData.gifts = userData.minigame_temp_loot.gifts || 0;
             }
-            
-            debugLog(`📍 Pos: ${sessionData.x},${sessionData.y} ⚡ Energy: ${sessionData.energy}`);
             updateStatus("Готово!", false);
             return true;
 
         } catch (e) {
-            debugLog("🔥 CRITICAL ERROR: " + e.message);
-            updateStatus("Ошибка. Играю локально.", false);
+            console.error("Ошибка загрузки:", e);
+            // Разрешаем играть локально при ошибках сети
+            updateStatus("Оффлайн режим", false);
         }
         return false;
     }
@@ -224,15 +186,12 @@
 
         try {
             const { error } = await supabase.rpc('autosave_game_progress', payload);
-            if (error) {
-                debugLog("⚠️ Ошибка автосохранения: " + error.message);
-                throw error;
-            }
+            if (error) throw error;
             
             unsavedChanges = false;
             setTimeout(() => indicator.classList.remove('show'), 500);
         } catch (e) {
-            console.error("Save error:", e);
+            console.error("Ошибка сохранения:", e);
         }
     }
 
@@ -248,7 +207,7 @@
         document.getElementById('btn-play').style.display = loading ? 'none' : 'block';
     }
 
-    // --- ДВИЖОК ИГРЫ (PHASER & AUDIO) ---
+    // --- ЗВУКИ И ИГРА ---
     const AudioEngine = {
         ctx: null, masterGain: null, windNode: null, windGain: null, slideNode: null, slideGain: null, isSliding: false,
         init: function() {
@@ -259,10 +218,7 @@
                 this.masterGain.gain.value = 0.8; 
                 this.masterGain.connect(this.ctx.destination);
                 this.initWind();
-                debugLog("🔊 Audio init OK");
-            } catch (e) {
-                debugLog("🔇 Audio init FAIL: " + e.message);
-            }
+            } catch(e) { console.log("Audio init failed"); }
         },
         initWind: function() {
             if(!this.ctx) return;
@@ -421,7 +377,6 @@
             const catText = this.add.text(0, 0, '🐱', { fontSize: '50px' }).setOrigin(0.5, 0.8).setDepth(100);
             this.catSprite = catText;
 
-            // Грузим картинку из SVG
             const canvas = document.createElement('canvas');
             canvas.width = 200; canvas.height = 200;
             const ctx = canvas.getContext('2d');
@@ -507,7 +462,6 @@
             this.objGroup.clear(true, true);
             this.chunks.clear();
             
-            // Используем sessionData, загруженные из облака
             const startX = sessionData.x * this.TILE_SIZE + this.TILE_SIZE/2;
             const startY = sessionData.y * this.TILE_SIZE + this.TILE_SIZE/2;
             this.catSprite.setPosition(startX, startY);
