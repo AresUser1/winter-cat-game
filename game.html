@@ -113,55 +113,73 @@
         loot: 0, coins: 0, gifts: 0
     };
 
-    // --- ЛОГИКА ЗАГРУЗКИ С АВТО-СОЗДАНИЕМ ИГРОКА ---
+    // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ЗАГРУЗКИ ---
     async function loadFromCloud() {
         updateStatus("Синхронизация...", true);
         try {
-            // 1. Пытаемся найти пользователя (без single(), чтобы избежать ошибки PGRST116)
+            // 1. Получаем параметры из URL (тут свежая энергия от бота)
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlEnergy = urlParams.get('energy');
+            const urlX = urlParams.get('x');
+            const urlY = urlParams.get('y');
+
+            // 2. Запрос в базу
             let { data, error } = await supabase.from('users')
                 .select('minigame_state, minigame_energy, minigame_temp_loot')
                 .eq('id', userId);
 
             if (error) throw error;
 
-            // 2. Если пользователя НЕТ (data пуст) -> СОЗДАЕМ ЕГО
+            // 3. Если новый юзер
             if (!data || data.length === 0) {
-                console.log("Пользователь не найден. Создаем нового...");
-                
+                console.log("Новый профиль...");
                 const { error: insertError } = await supabase.from('users').insert([{
                     id: userId,
                     cat_name: 'Кот', 
                     minigame_energy: 50
                 }]);
-
                 if (insertError) throw insertError;
-
-                // Сразу устанавливаем дефолтные значения
+                
+                // Дефолт
                 sessionData = { x: 0, y: 0, energy: 50, loot: 0, coins: 0, gifts: 0 };
-                updateStatus("Профиль создан!", false);
-                return true;
+            } else {
+                // 4. Юзер есть -> ГРУЗИМ ДАННЫЕ
+                const userData = data[0];
+
+                // А) КООРДИНАТЫ: Приоритет базе данных (сохранение), но если там пусто - берем из URL
+                if (userData.minigame_state) {
+                    sessionData.x = userData.minigame_state.x !== undefined ? userData.minigame_state.x : (parseInt(urlX) || 0);
+                    sessionData.y = userData.minigame_state.y !== undefined ? userData.minigame_state.y : (parseInt(urlY) || 0);
+                } else {
+                    sessionData.x = parseInt(urlX) || 0;
+                    sessionData.y = parseInt(urlY) || 0;
+                }
+
+                // Б) ЭНЕРГИЯ: ПРИОРИТЕТ URL (так как Python посчитал регенерацию времени)
+                // Если в URL есть энергия, используем её. Если нет - берем из базы.
+                if (urlEnergy !== null && urlEnergy !== undefined) {
+                    sessionData.energy = parseInt(urlEnergy);
+                    console.log("Energy loaded from URL (Regenerated):", sessionData.energy);
+                } else {
+                    sessionData.energy = userData.minigame_energy !== null ? userData.minigame_energy : 50;
+                    console.log("Energy loaded from DB:", sessionData.energy);
+                }
+                
+                // В) Временный лут (если игра вылетела)
+                if (userData.minigame_temp_loot) {
+                    sessionData.loot = userData.minigame_temp_loot.loot || 0;
+                    sessionData.coins = userData.minigame_temp_loot.coins || 0;
+                    sessionData.gifts = userData.minigame_temp_loot.gifts || 0;
+                }
             }
 
-            // 3. Если пользователь ЕСТЬ -> Грузим данные
-            const userData = data[0];
-            if (userData.minigame_state) {
-                sessionData.x = userData.minigame_state.x || 0;
-                sessionData.y = userData.minigame_state.y || 0;
-            }
-            sessionData.energy = userData.minigame_energy !== null ? userData.minigame_energy : 50;
-            
-            if (userData.minigame_temp_loot) {
-                sessionData.loot = userData.minigame_temp_loot.loot || 0;
-                sessionData.coins = userData.minigame_temp_loot.coins || 0;
-                sessionData.gifts = userData.minigame_temp_loot.gifts || 0;
-            }
+            updateHTMLStats(); // Обновляем визуал сразу
             updateStatus("Готово!", false);
             return true;
 
         } catch (e) {
             console.error("Ошибка загрузки:", e);
-            // Разрешаем играть локально при ошибках сети
-            updateStatus("Оффлайн режим", false);
+            updateStatus("Ошибка сети", false);
         }
         return false;
     }
